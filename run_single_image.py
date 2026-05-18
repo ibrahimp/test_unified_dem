@@ -69,6 +69,18 @@ def parse_args():
         help="Which model output head(s) to save. auto uses single for Bayer, quad for Quad Bayer, and all for RGB.",
     )
     parser.add_argument(
+        "--output-format",
+        choices=["npy", "raw", "both"],
+        default="npy",
+        help="Primary model output format. raw writes headerless interleaved HxWx3 uint16 RGB samples.",
+    )
+    parser.add_argument(
+        "--output-raw-byte-order",
+        choices=["little", "big", "native"],
+        default="little",
+        help="Byte order for headerless .raw model outputs.",
+    )
+    parser.add_argument(
         "--sensor-max",
         type=float,
         default=DEFAULT_SENSOR_MAX,
@@ -390,7 +402,13 @@ def output_paths(output_arg, input_path, head):
     else:
         stem_path = output / Path(input_path).stem
     suffix = f"_{head}" if head != "all" else ""
-    return stem_path.parent / f"{stem_path.name}{suffix}.npy", stem_path.parent / f"{stem_path.name}{suffix}.png"
+    base_path = stem_path.parent / f"{stem_path.name}{suffix}"
+    return base_path.with_suffix(".npy"), base_path.with_suffix(".raw"), base_path.with_suffix(".png")
+
+
+def save_raw_output(path, image_u16, byte_order):
+    dtype = raw_numpy_dtype("uint16", byte_order)
+    image_u16.astype(dtype, copy=False).tofile(path)
 
 
 def save_png_preview(path, image_u16, sensor_max, gamma):
@@ -450,13 +468,16 @@ def main():
 
     for head in heads:
         image_u16 = tensor_to_uint16(named_outputs[head], original_shape, args.sensor_max)
-        npy_path, png_path = output_paths(args.output, args.input, head)
+        npy_path, raw_path, png_path = output_paths(args.output, args.input, head)
         npy_path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(npy_path, image_u16)
+        if args.output_format in ("npy", "both"):
+            np.save(npy_path, image_u16)
+            print(f"saved {head}: {npy_path}")
+        if args.output_format in ("raw", "both"):
+            save_raw_output(raw_path, image_u16, args.output_raw_byte_order)
+            print(f"saved {head} raw: {raw_path}")
         if args.save_png:
             save_png_preview(png_path, image_u16, args.sensor_max, args.png_gamma)
-        print(f"saved {head}: {npy_path}")
-        if args.save_png:
             print(f"saved {head} preview: {png_path}")
 
 
