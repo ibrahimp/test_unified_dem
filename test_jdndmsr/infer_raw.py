@@ -3,9 +3,10 @@
 """
 Run one 10-bit uint16 RAW Bayer frame through a trained JDNDMSR model.
 
-The network was trained on RGGB mosaics normalized to [-1, 1]. This script aligns
-other Bayer orders before inference, then writes both a viewable RGB image and a
-remosaiced uint16 RAW file in the requested output pattern.
+The network was trained on RGGB mosaics normalized to [-1, 1]. The repo uses
+OpenCV for training images, so the model output channel order is BGR. This
+script aligns other Bayer orders before inference, then writes both a viewable
+RGB image and a remosaiced uint16 RAW file in the requested output pattern.
 """
 
 import argparse
@@ -165,14 +166,14 @@ def predict_tiled(model, mosaic, args, max_value, add_noise):
     return accum / np.maximum(weights, 1.0e-6)
 
 
-def remosaic_rgb(rgb, pattern, max_value):
-    height, width, _ = rgb.shape
+def remosaic_bgr(bgr, pattern, max_value):
+    height, width, _ = bgr.shape
     out = np.empty((height, width), dtype=np.float32)
     order = pattern.lower()
     for y_parity in range(2):
         for x_parity in range(2):
             color = order[y_parity * 2 + x_parity]
-            out[y_parity::2, x_parity::2] = rgb[y_parity::2, x_parity::2, COLOR_INDEX[color]]
+            out[y_parity::2, x_parity::2] = bgr[y_parity::2, x_parity::2, COLOR_INDEX[color]]
     return np.clip(np.rint(out * max_value), 0, max_value).astype(np.uint16)
 
 
@@ -190,22 +191,22 @@ def main():
     network_raw = align_to_rggb(raw, args.pattern)
 
     model = make_model(args, add_noise)
-    rgb = predict_tiled(model, network_raw, args, max_value, add_noise)
-    rgb = undo_alignment(rgb, args.pattern, args.scale_factor)
+    bgr = predict_tiled(model, network_raw, args, max_value, add_noise)
+    bgr = undo_alignment(bgr, args.pattern, args.scale_factor)
 
     base = args.output_name or os.path.splitext(os.path.basename(args.input))[0]
     tiff_path = os.path.join(args.output_dir, base + "_jdndmsr_rgb16.tiff")
     png_path = os.path.join(args.output_dir, base + "_jdndmsr_preview.png")
     raw_path = os.path.join(args.output_dir, base + "_jdndmsr_bayer{}.raw".format(output_pattern.upper()))
-    rgb16 = np.clip(np.rint(rgb * max_value), 0, max_value).astype(np.uint16)
-    cv2.imwrite(tiff_path, cv2.cvtColor(rgb16, cv2.COLOR_RGB2BGR))
-    cv2.imwrite(png_path, cv2.cvtColor((rgb * 255.0).clip(0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
-    raw_out = remosaic_rgb(rgb, output_pattern, max_value)
+    bgr16 = np.clip(np.rint(bgr * max_value), 0, max_value).astype(np.uint16)
+    cv2.imwrite(tiff_path, bgr16)
+    cv2.imwrite(png_path, (bgr * 255.0).clip(0, 255).astype(np.uint8))
+    raw_out = remosaic_bgr(bgr, output_pattern, max_value)
     write_raw(raw_path, raw_out, args.byte_order)
     print("Wrote viewable preview: {}".format(png_path))
     print("Wrote viewable RGB: {}".format(tiff_path))
     print("Wrote remosaiced RAW: {}".format(raw_path))
-    print("Output size: {}x{} pixels".format(rgb.shape[1], rgb.shape[0]))
+    print("Output size: {}x{} pixels".format(bgr.shape[1], bgr.shape[0]))
 
 
 if __name__ == "__main__":
