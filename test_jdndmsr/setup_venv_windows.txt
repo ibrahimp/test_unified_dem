@@ -1,0 +1,47 @@
+@echo off
+setlocal
+
+REM TensorFlow GPU 1.14 on Windows needs a legacy Python/CUDA stack:
+REM Python 3.6 or 3.7, CUDA 10.0, and cuDNN 7.x available on PATH.
+REM Install Python 3.6 from python.org if no compatible interpreter is available.
+
+set VENV_DIR=.venv-jdndmsr
+set PYTHON_CMD=
+
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -3.6 -c "import sys" >nul 2>nul
+    if not errorlevel 1 set PYTHON_CMD=py -3.6
+    if not defined PYTHON_CMD (
+        py -3.7 -c "import sys" >nul 2>nul
+        if not errorlevel 1 set PYTHON_CMD=py -3.7
+    )
+)
+
+if not defined PYTHON_CMD (
+    where python >nul 2>nul
+    if not errorlevel 1 set PYTHON_CMD=python
+)
+
+if not defined PYTHON_CMD (
+    echo Could not find Python. Install Python 3.6, then rerun this script.
+    exit /b 1
+)
+
+%PYTHON_CMD% -m venv %VENV_DIR%
+if errorlevel 1 (
+    echo Failed to create the venv.
+    echo Install Python 3.6 if tensorflow-gpu 1.14 is not available for your Python version.
+    exit /b 1
+)
+
+call %VENV_DIR%\Scripts\activate.bat
+python -m pip install --upgrade "pip<21" "setuptools<60" wheel
+pip install -r requirements-venv.txt
+
+echo.
+echo Environment ready. Activate it with:
+echo   %VENV_DIR%\Scripts\activate.bat
+echo.
+echo Example inference command:
+echo   python infer_raw.py --input path\frame.raw --width 4000 --height 3000 --output-dir out --pattern grbg --model models\jdndmsr+_model.h5 --tile-size 1024
