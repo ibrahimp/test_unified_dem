@@ -6,7 +6,7 @@ Run one 10-bit uint16 RAW Bayer frame through a trained JDNDMSR model.
 The network was trained on RGGB mosaics normalized to [-1, 1]. The repo uses
 OpenCV for training images, so the model output channel order is BGR. This
 script aligns other Bayer orders before inference, then writes both a viewable
-RGB image and a remosaiced uint16 RAW file in the requested output pattern.
+RGB image and a remosaiced uint16 RAW file in the requested output mosaic.
 """
 
 import argparse
@@ -45,8 +45,9 @@ def parse_args():
     parser.add_argument("--output-dir", default="raw_infer_results", help="Directory for outputs.")
     parser.add_argument("--output-name", default=None, help="Base name for output files.")
     parser.add_argument("--model", default="models/jdndmsr+_model.h5", help="Trained .h5 weights path.")
-    parser.add_argument("--pattern", default="grbg", choices=sorted(RGGB_OFFSETS), help="Input/output Bayer order.")
-    parser.add_argument("--output-pattern", default=None, choices=sorted(RGGB_OFFSETS), help="RAW output order. Defaults to --pattern.")
+    parser.add_argument("--pattern", default="grbg", choices=sorted(RGGB_OFFSETS), help="Input Bayer order.")
+    parser.add_argument("--output-raw-mosaic", default="bayer", choices=["bayer", "quad-bayer"], help="RAW output mosaic format.")
+    parser.add_argument("--output-pattern", default=None, choices=sorted(RGGB_OFFSETS), help="RAW output order. Defaults to input pattern for Bayer output, GRBG for Quad Bayer output.")
     parser.add_argument("--bit-depth", type=int, default=10, help="Valid signal bits in the uint16 RAW.")
     parser.add_argument("--byte-order", default="little", choices=["little", "big"], help="Input/output uint16 byte order.")
     parser.add_argument("--scale-factor", type=int, default=2, choices=[1, 2, 3, 4], help="Model super-resolution scale factor.")
@@ -166,21 +167,37 @@ def predict_tiled(model, mosaic, args, max_value, add_noise):
     return accum / np.maximum(weights, 1.0e-6)
 
 
-def remosaic_bgr(bgr, pattern, max_value):
+def remosaic_bgr(bgr, pattern, mosaic_type, max_value):
     height, width, _ = bgr.shape
     out = np.empty((height, width), dtype=np.float32)
     order = pattern.lower()
-    for y_parity in range(2):
-        for x_parity in range(2):
-            color = order[y_parity * 2 + x_parity]
-            out[y_parity::2, x_parity::2] = bgr[y_parity::2, x_parity::2, COLOR_INDEX[color]]
+    if mosaic_type == "bayer":
+        for y_parity in range(2):
+            for x_parity in range(2):
+                color = order[y_parity * 2 + x_parity]
+                out[y_parity::2, x_parity::2] = bgr[y_parity::2, x_parity::2, COLOR_INDEX[color]]
+    else:
+        for group_y in range(2):
+            for group_x in range(2):
+                color = order[group_y * 2 + group_x]
+                y0 = group_y * 2
+                x0 = group_x * 2
+                out[y0::4, x0::4] = bgr[y0::4, x0::4, COLOR_INDEX[color]]
+                out[y0 + 1::4, x0::4] = bgr[y0 + 1::4, x0::4, COLOR_INDEX[color]]
+                out[y0::4, x0 + 1::4] = bgr[y0::4, x0 + 1::4, COLOR_INDEX[color]]
+                out[y0 + 1::4, x0 + 1::4] = bgr[y0 + 1::4, x0 + 1::4, COLOR_INDEX[color]]
     return np.clip(np.rint(out * max_value), 0, max_value).astype(np.uint16)
 
 
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
-    output_pattern = args.output_pattern or args.pattern
+    if args.output_pattern:
+        output_pattern = args.output_pattern
+    elif args.output_raw_mosaic == "quad-bayer":
+        output_pattern = "grbg"
+    else:
+        output_pattern = args.pattern
     max_value = (1 << args.bit_depth) - 1
     add_noise = args.noise > 0
 
@@ -197,11 +214,12 @@ def main():
     base = args.output_name or os.path.splitext(os.path.basename(args.input))[0]
     tiff_path = os.path.join(args.output_dir, base + "_jdndmsr_rgb16.tiff")
     png_path = os.path.join(args.output_dir, base + "_jdndmsr_preview.png")
-    raw_path = os.path.join(args.output_dir, base + "_jdndmsr_bayer{}.raw".format(output_pattern.upper()))
+    raw_mosaic_name = args.output_raw_mosaic.replace("-", "")
+    raw_path = os.path.join(args.output_dir, base + "_jdndmsr_{}{}.raw".format(raw_mosaic_name, output_pattern.upper()))
     bgr16 = np.clip(np.rint(bgr * max_value), 0, max_value).astype(np.uint16)
     cv2.imwrite(tiff_path, bgr16)
     cv2.imwrite(png_path, (bgr * 255.0).clip(0, 255).astype(np.uint8))
-    raw_out = remosaic_bgr(bgr, output_pattern, max_value)
+    raw_out = remosaic_bgr(bgr, output_pattern, args.output_raw_mosaic, max_value)
     write_raw(raw_path, raw_out, args.byte_order)
     print("Wrote viewable preview: {}".format(png_path))
     print("Wrote viewable RGB: {}".format(tiff_path))
