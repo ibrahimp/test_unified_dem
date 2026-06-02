@@ -7,7 +7,7 @@ JDNDMSR model.
 The network was trained on RGGB mosaics normalized to [-1, 1]. The repo uses
 OpenCV for training images, so the model output channel order is BGR. This
 script aligns other Bayer orders before inference, then writes both a viewable
-RGB image and a remosaiced uint16 RAW file in the requested output mosaic.
+RGB image and a uint16 RAW file in the requested output format.
 """
 
 import argparse
@@ -45,11 +45,12 @@ def parse_args():
     parser.add_argument("--height", type=int, required=True, help="Input RAW height in pixels.")
     parser.add_argument("--output-dir", default="raw_infer_results", help="Directory for outputs.")
     parser.add_argument("--output-name", default=None, help="Base name for output files.")
+    parser.add_argument("--raw-output", default=None, help="Optional exact output path for the uint16 RAW file.")
     parser.add_argument("--model", default="models/jdndmsr+_model.h5", help="Trained .h5 weights path.")
     parser.add_argument("--input-raw-mosaic", default="bayer", choices=["bayer", "quad-bayer"], help="Input RAW mosaic format. Quad Bayer input is 2x2-binned to regular Bayer before inference.")
     parser.add_argument("--pattern", default="grbg", choices=sorted(RGGB_OFFSETS), help="Input Bayer order, or Quad Bayer 2x2 block order.")
-    parser.add_argument("--output-raw-mosaic", default="bayer", choices=["bayer", "quad-bayer"], help="RAW output mosaic format.")
-    parser.add_argument("--output-pattern", default=None, choices=sorted(RGGB_OFFSETS), help="RAW output order. Defaults to input pattern for Bayer output, GRBG for Quad Bayer output.")
+    parser.add_argument("--output-raw-mosaic", default="bayer", choices=["bayer", "quad-bayer", "rgb"], help="RAW output format. Use rgb for interleaved full-color R-G-B uint16 output.")
+    parser.add_argument("--output-pattern", default=None, choices=sorted(RGGB_OFFSETS), help="RAW output order. Defaults to input pattern for Bayer output, GRBG for Quad Bayer output. Ignored for RGB output.")
     parser.add_argument("--bit-depth", type=int, default=10, help="Valid signal bits in the uint16 RAW.")
     parser.add_argument("--byte-order", default="little", choices=["little", "big"], help="Input/output uint16 byte order.")
     parser.add_argument("--scale-factor", type=int, default=2, choices=[1, 2, 3, 4], help="Model super-resolution scale factor.")
@@ -205,6 +206,11 @@ def remosaic_bgr(bgr, pattern, mosaic_type, max_value):
     return np.clip(np.rint(out * max_value), 0, max_value).astype(np.uint16)
 
 
+def bgr_to_interleaved_rgb_raw(bgr, max_value):
+    rgb = bgr[:, :, [2, 1, 0]]
+    return np.clip(np.rint(rgb * max_value), 0, max_value).astype(np.uint16)
+
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -212,6 +218,8 @@ def main():
         output_pattern = args.output_pattern
     elif args.output_raw_mosaic == "quad-bayer":
         output_pattern = "grbg"
+    elif args.output_raw_mosaic == "rgb":
+        output_pattern = "rgb"
     else:
         output_pattern = args.pattern
     max_value = (1 << args.bit_depth) - 1
@@ -235,11 +243,17 @@ def main():
     tiff_path = os.path.join(args.output_dir, base + "_jdndmsr_rgb16.tiff")
     png_path = os.path.join(args.output_dir, base + "_jdndmsr_preview.png")
     raw_mosaic_name = args.output_raw_mosaic.replace("-", "")
-    raw_path = os.path.join(args.output_dir, base + "_jdndmsr_{}{}.raw".format(raw_mosaic_name, output_pattern.upper()))
+    raw_path = args.raw_output or os.path.join(args.output_dir, base + "_jdndmsr_{}{}.raw".format(raw_mosaic_name, output_pattern.upper()))
+    raw_parent = os.path.dirname(raw_path)
+    if raw_parent:
+        os.makedirs(raw_parent, exist_ok=True)
     bgr16 = np.clip(np.rint(bgr * max_value), 0, max_value).astype(np.uint16)
     cv2.imwrite(tiff_path, bgr16)
     cv2.imwrite(png_path, (bgr * 255.0).clip(0, 255).astype(np.uint8))
-    raw_out = remosaic_bgr(bgr, output_pattern, args.output_raw_mosaic, max_value)
+    if args.output_raw_mosaic == "rgb":
+        raw_out = bgr_to_interleaved_rgb_raw(bgr, max_value)
+    else:
+        raw_out = remosaic_bgr(bgr, output_pattern, args.output_raw_mosaic, max_value)
     write_raw(raw_path, raw_out, args.byte_order)
     print("Wrote viewable preview: {}".format(png_path))
     print("Wrote viewable RGB: {}".format(tiff_path))

@@ -59,6 +59,32 @@ python infer_raw.py ^
 
 This writes a RAW file named like `*_jdndmsr_quadbayerGRBG.raw`.
 
+## Full RGB RAW Output
+
+To write full-color RAW instead of a Bayer mosaic, use
+`--output-raw-mosaic rgb`. The output is headerless uint16 data in
+pixel-interleaved R-G-B order:
+
+```text
+R0 G0 B0 R1 G1 B1 R2 G2 B2 ...
+```
+
+```bat
+python infer_raw.py ^
+  --input C:\data\frame.raw ^
+  --width 4000 ^
+  --height 3000 ^
+  --pattern grbg ^
+  --output-raw-mosaic rgb ^
+  --raw-output C:\data\jdndmsr_out\frame_rgb_interleaved.raw ^
+  --model models\jdndmsr+_model.h5 ^
+  --tile-size 1024 ^
+  --output-dir C:\data\jdndmsr_out
+```
+
+Without `--raw-output`, this writes a RAW file named like
+`*_jdndmsr_rgbRGB.raw`.
+
 ## Quad-Bayer RAW Input
 
 The trained model only accepts regular Bayer input. If your input file is Quad
