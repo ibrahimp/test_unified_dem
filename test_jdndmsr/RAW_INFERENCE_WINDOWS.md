@@ -59,5 +59,30 @@ python infer_raw.py ^
 
 This writes a RAW file named like `*_jdndmsr_quadbayerGRBG.raw`.
 
+## Quad-Bayer RAW Input
+
+The trained model only accepts regular Bayer input. If your input file is Quad
+Bayer, pass `--input-raw-mosaic quad-bayer`. The script reads the full input
+size, bins each same-color 2x2 Quad Bayer block to one regular Bayer sample,
+and then feeds the binned Bayer image to the model.
+
+With the default `--scale-factor 2`, a `4000x3000` Quad Bayer input becomes a
+`2000x1500` Bayer tensor internally, and the model output returns to
+`4000x3000`.
+
+```bat
+python infer_raw.py ^
+  --input C:\data\quad_frame.raw ^
+  --width 4000 ^
+  --height 3000 ^
+  --input-raw-mosaic quad-bayer ^
+  --pattern grbg ^
+  --output-raw-mosaic quad-bayer ^
+  --model models\jdndmsr+_model.h5 ^
+  --scale-factor 2 ^
+  --tile-size 1024 ^
+  --output-dir C:\data\jdndmsr_out
+```
+
 Set `--tile-size 0` to run the whole frame at once. If the GPU runs out of
 memory, use a smaller even tile size such as `768` or `512`.

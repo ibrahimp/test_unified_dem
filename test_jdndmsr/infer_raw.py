@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Run one 10-bit uint16 RAW Bayer frame through a trained JDNDMSR model.
+Run one 10-bit uint16 RAW Bayer or binned Quad Bayer frame through a trained
+JDNDMSR model.
 
 The network was trained on RGGB mosaics normalized to [-1, 1]. The repo uses
 OpenCV for training images, so the model output channel order is BGR. This
@@ -45,7 +46,8 @@ def parse_args():
     parser.add_argument("--output-dir", default="raw_infer_results", help="Directory for outputs.")
     parser.add_argument("--output-name", default=None, help="Base name for output files.")
     parser.add_argument("--model", default="models/jdndmsr+_model.h5", help="Trained .h5 weights path.")
-    parser.add_argument("--pattern", default="grbg", choices=sorted(RGGB_OFFSETS), help="Input Bayer order.")
+    parser.add_argument("--input-raw-mosaic", default="bayer", choices=["bayer", "quad-bayer"], help="Input RAW mosaic format. Quad Bayer input is 2x2-binned to regular Bayer before inference.")
+    parser.add_argument("--pattern", default="grbg", choices=sorted(RGGB_OFFSETS), help="Input Bayer order, or Quad Bayer 2x2 block order.")
     parser.add_argument("--output-raw-mosaic", default="bayer", choices=["bayer", "quad-bayer"], help="RAW output mosaic format.")
     parser.add_argument("--output-pattern", default=None, choices=sorted(RGGB_OFFSETS), help="RAW output order. Defaults to input pattern for Bayer output, GRBG for Quad Bayer output.")
     parser.add_argument("--bit-depth", type=int, default=10, help="Valid signal bits in the uint16 RAW.")
@@ -72,6 +74,20 @@ def read_raw(path, width, height, byte_order):
 def write_raw(path, image, byte_order):
     dtype = np.dtype("<u2" if byte_order == "little" else ">u2")
     image.astype(dtype, copy=False).tofile(path)
+
+
+def bin_quad_bayer_to_bayer(raw):
+    height, width = raw.shape
+    if height % 2 or width % 2:
+        raise ValueError("Quad Bayer input dimensions must be even for 2x2 binning.")
+    raw32 = raw.astype(np.float32)
+    binned = (
+        raw32[0::2, 0::2]
+        + raw32[0::2, 1::2]
+        + raw32[1::2, 0::2]
+        + raw32[1::2, 1::2]
+    ) * 0.25
+    return binned
 
 
 def align_to_rggb(raw, pattern):
@@ -204,6 +220,10 @@ def main():
     raw = read_raw(args.input, args.width, args.height, args.byte_order)
     if raw.max() > max_value:
         print("Warning: input contains values above {} for {}-bit data.".format(max_value, args.bit_depth))
+
+    if args.input_raw_mosaic == "quad-bayer":
+        raw = bin_quad_bayer_to_bayer(raw)
+        print("Binned Quad Bayer input to Bayer size: {}x{}".format(raw.shape[1], raw.shape[0]))
 
     network_raw = align_to_rggb(raw, args.pattern)
 
