@@ -1,0 +1,5 @@
+python inference_single_rawimage.py ^
+  --input "C:\Demosaic\QBDM2\converted_raws\DSC04815_PSMS_iso800_qb.raw" ^
+  --checkpoint "runs\unified_cfa_FiLM_SR_iso12800_gradclip5_ChLoss\best.pt" ^
+  --output-dir "./benchmark_results_0710" --output-filename "test0710" ^
+  --width 2160 --height 1440 --iso 6400 --input-bits 12
