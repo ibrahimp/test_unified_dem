@@ -1,0 +1,11 @@
+@echo off
+python train.py ^
+  --data-root C:\Demosaic\Data\patches_256_uint16 ^
+  --dataset-mode unified_patches --hard_patch_percentile 0.25 ^
+  --out-dir runs\unified_cfa_FiLM_SR_iso12800_gradclip5_ChLoss_WB2_QB ^
+  --patch-size 256 --binning 1 --use_cfa --width 80 --blocks 64 --downsample 4 ^
+  --max-iso 12800 --val-iso-levels 100 800 3200 6400 12800 ^
+  --batch-size 32 --epochs 200 --amp ^
+  --save_val_visual --val_scene_name DSC01189_PSMS_r0_c0 --save_every 10 ^
+  --lr 1.0e-3 --lr_end 1.0e-5 --mode bayer ^
+  --weight-decay 1.0e-3 --weight_g 2.0 

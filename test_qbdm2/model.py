@@ -55,6 +55,8 @@ class SimplifiedNAFBlock(nn.Module):
 class SimplifiedNAFNet(nn.Module):
     def __init__(self, in_channels, out_channels=3, width=32, blocks=16, downsample=4, dropout=0.0, debug_logging=False, binning=1):
         super().__init__()
+        
+        # --- BOTTLENECK RESTORED: Spatial downsampling at input ---
         self.downsample = downsample
         self.in_proj = nn.Conv2d(in_channels, width, downsample, stride=downsample)
         
@@ -75,21 +77,10 @@ class SimplifiedNAFNet(nn.Module):
             self.mlp[-1].bias.copy_(biases)
 
         self.body = nn.ModuleList([SimplifiedNAFBlock(width, dropout=dropout) for _ in range(blocks)])
+        
+        # --- BOTTLENECK RESTORED: SR upsampling at output ---
         self.out_proj = nn.Conv2d(width, out_channels * downsample * downsample, 1)
         self.upsample = nn.PixelShuffle(downsample)
-        
-        # --- LEARNED SUPER-RESOLUTION HEAD ---
-        self.binning = binning
-        if binning > 1:
-            self.final_upsample = nn.Sequential(
-                nn.Conv2d(out_channels, width // 4, 3, padding=1),   
-                nn.LeakyReLU(inplace=True),                         
-                nn.Conv2d(width // 4, out_channels * binning * binning, 3, padding=1), 
-                nn.PixelShuffle(binning)                            
-            )
-        else:
-            self.final_upsample = nn.Identity()
-
         
         # Debug logging control
         self.debug_logging = debug_logging
@@ -143,8 +134,7 @@ class SimplifiedNAFNet(nn.Module):
             y = block(y, gamma, beta)
             
         y = self.out_proj(y)
-        y = self.upsample(y)
-        y = self.final_upsample(y) # Apply learned upsampling
+        y = self.upsample(y) # Restore latent-space upsampling
         
         # --- PURE LINEAR OUTPUT (No Sigmoid/Clamp) ---
         return y

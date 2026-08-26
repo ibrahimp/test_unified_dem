@@ -17,6 +17,12 @@ UNIFIED_SPLITS = {
     "test": [7, 8, 15, 16, 17],
 }
 
+# --- WHITE BALANCE AUGMENTATION CONFIGURATION ---
+WB_GAIN_R_RANGE = (1.2, 1.80) # Wide range to cover various lighting conditions
+WB_GAIN_B_RANGE = (1.2, 1.80)
+
+VAL_WB_GAINS = np.array([1.50, 1.0000, 1.5]) 
+
 def list_images(folder):
     folder = Path(folder)
     return sorted(path for path in folder.rglob("*") if path.suffix.lower() in IMAGE_EXTS)
@@ -203,7 +209,7 @@ def make_cfa_masks(height, width, pattern, mode):
             for x_mod in range(2):
                 channel = COLOR_TO_CHANNEL[pattern[y_mod * 2 + x_mod]]
                 masks[channel, y_mod::2, x_mod::2] = 1.0
-    else:
+    else: # Quad Bayer (blocks)
         for y_block in range(0, 4, 2):
             for x_block in range(0, 4, 2):
                 channel = COLOR_TO_CHANNEL[pattern_color(pattern, y_block, x_block, mode)]
@@ -268,6 +274,20 @@ class QuadBayerDataset(Dataset):
         _, gt_path = self.paths[index] 
         rgb_gt = load_data(gt_path, self.args.npy_scale)
         
+        # --- APPLY WHITE BALANCE (Random during Train, Fixed during Val) ---
+        if self.train:
+            r_gain = random.uniform(WB_GAIN_R_RANGE[0], WB_GAIN_R_RANGE[1])
+            b_gain = random.uniform(WB_GAIN_B_RANGE[0], WB_GAIN_B_RANGE[1])
+            g_gain = 1.0 
+            
+            gains = np.array([r_gain, g_gain, b_gain])
+        else:
+            gains = VAL_WB_GAINS
+
+        if len(rgb_gt.shape) == 3:
+            rgb_gt *= gains
+            rgb_gt = np.clip(rgb_gt, 0.0, 1.0) 
+            
         patch_size = align_size(self.args.patch_size, self.args.downsample)
 
         if self.train:
@@ -284,11 +304,12 @@ class QuadBayerDataset(Dataset):
         if self.train and self.args.multi_pattern:
             pattern = random.choice(self.active_patterns)
         
-        generation_mode = "quad_bayer" if self.args.binning > 1 else self.args.mode
+        # --- MODIFICATION: Force Quad Bayer Generation ---
+        generation_mode = "quad_bayer" 
         
         raw_mosaic_clean = rgb_to_bayer(rgb_gt_cropped, pattern, generation_mode)
         
-        # Apply symmetric noise BEFORE binning
+        # Apply symmetric noise BEFORE binning (now on neutralized/randomized data)
         raw_mosaic_noisy = apply_poisson_gaussian_noise(raw_mosaic_clean, target_iso, self.args.npy_scale)
 
         if self.args.binning > 1:
@@ -307,13 +328,13 @@ class QuadBayerDataset(Dataset):
 
         height, width = raw_input_noisy.shape
         
-        masks = make_cfa_masks(height, width, pattern, "bayer") 
+        # FIX: Use generation_mode for masks to match the input data (Quad Bayer blocks vs Checkerboard)
+        masks = make_cfa_masks(height, width, pattern, generation_mode) 
         
         inputs = [raw_input_noisy[None]]
         if self.args.use_cfa:
             inputs.append(masks)
             
-        # No pedestal injection. Raw symmetric values flow directly to the linear network.
         x = np.concatenate(inputs, axis=0).astype(np.float32)
         y = np.transpose(rgb_gt_cropped, (2, 0, 1)).astype(np.float32)
         
